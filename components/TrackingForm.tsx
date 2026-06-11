@@ -33,12 +33,14 @@ export default function TrackingForm() {
   const [state, setState] = useState<FormState>({ phase: "idle" });
   const turnstileRef = useRef<TurnstileWidgetRef>(null);
 
-  const handleCaptchaVerify = useCallback((token: string) => {
-    void submitTracking(token);
-  }, []);
+  // Keep a ref so the Turnstile callback always reads the latest tracking
+  // number — the callback is captured once when the widget mounts, and the
+  // widget does not re-register it on re-render.
+  const trackingNumberRef = useRef(trackingNumber);
+  trackingNumberRef.current = trackingNumber;
 
-  async function submitTracking(turnstileToken: string) {
-    const number = trackingNumber.trim();
+  const handleCaptchaVerify = useCallback((token: string) => {
+    const number = trackingNumberRef.current.trim();
     if (!number) {
       setState({ phase: "idle" });
       return;
@@ -46,30 +48,31 @@ export default function TrackingForm() {
 
     setState({ phase: "fetching" });
 
-    try {
-      const res = await fetch("/api/tracking", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ trackingNumber: number, turnstileToken }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
+    fetch("/api/tracking", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ trackingNumber: number, turnstileToken: token }),
+    })
+      .then(async (res) => {
+        const data = await res.json();
+        if (!res.ok) {
+          setState({
+            phase: "error",
+            message: data.error ?? "Failed to fetch tracking data.",
+          });
+          turnstileRef.current?.reset();
+        } else {
+          setState({ phase: "success", data });
+        }
+      })
+      .catch(() => {
         setState({
           phase: "error",
-          message: data.error ?? "Failed to fetch tracking data.",
+          message: "Network error. Please try again.",
         });
         turnstileRef.current?.reset();
-        return;
-      }
-
-      setState({ phase: "success", data });
-    } catch {
-      setState({ phase: "error", message: "Network error. Please try again." });
-      turnstileRef.current?.reset();
-    }
-  }
+      });
+  }, []);
 
   return (
     <div className="flex w-full max-w-xl flex-col items-center gap-6">
