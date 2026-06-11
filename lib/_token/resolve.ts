@@ -12,10 +12,26 @@
 //
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
-import type { NextConfig } from "next";
+import {
+  getToken,
+  getInFlightRequest,
+  setInFlightRequest,
+} from "@/lib/_token/cache";
+import { fetchToken } from "@/lib/_token/auth";
 
-const nextConfig: NextConfig = {
-  output: "standalone",
-};
+/**
+ * Return a valid auth token — cache-first, with in-flight deduplication so
+ * concurrent requests share a single auth call.
+ */
+export async function resolveToken(): Promise<string> {
+  const cached = getToken();
+  if (cached) return cached;
 
-export default nextConfig;
+  const inFlight = getInFlightRequest();
+  if (inFlight) return inFlight;
+
+  const promise = fetchToken().finally(() => setInFlightRequest(null));
+  setInFlightRequest(promise);
+
+  return promise;
+}
